@@ -1,0 +1,378 @@
+blueprint:
+  name: Motion based light (With extra spice)
+  description: Turn a light on based on binary sensor, unless blocking entity is on or illuminance threshold is not met, in which case it will turn off. You can also select a scene to start instead of turning the light off, after a given time of day. Oh and also dim the lights between a certain time of day, and keep the light on if excessive humidity is detected (shower mode).
+  domain: automation
+  author: CasperBjerggaardJohansen
+  homeassistant:
+    min_version: 2024.6.0
+
+  input:
+    motion_sensor:
+      name: Motion Sensor *
+      description: This sensor will turn on the light or renew the delay period if the light is already on.
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+              device_class:
+                - occupancy
+                - motion
+
+    target_light:
+      name: Lights *
+      description: The lights to trigger
+      selector:
+        target:
+          entity:
+            - domain: light
+    target_light_brightness:
+      name: Light brightness *
+      description: Brightness of lights on trigger
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+    target_light_temp:
+      name: Light temperature *
+      description: temperature of lights on trigger
+      default: 4200
+      selector:
+        color_temp:
+          unit: kelvin
+
+    blocking_entity:
+      name: Blocking entity *
+      description: This entity will block the light from being turned on from this blueprint, and also turn off the light if it is on while switched.
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+    no_motion_wait:
+      name: Wait time *
+      description: Time to leave the light on after last motion is detected. This countdown starts AFTER the motion sensor reports no motion. This delay will restart everytime new motion is detected.
+      default: 120
+      selector:
+        number:
+          min: 0
+          max: 3600
+          unit_of_measurement: seconds
+    illuminance:
+      name: Illuminance Sensor
+      icon: mdi:sun-wireless
+      description: (optional)
+      input:
+        use_illuminance_sensor:
+          name: Use illuminance sensor
+          description: if this is checked, the automation will use illuminance sensor
+          default: false
+          selector:
+            boolean:
+        illuminance_sensor:
+          name: Illuminance Sensor
+          description: This sensor will block the light from turning on if the illuminance threshold is not met.
+          default: {}
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+        Illuminance_threshold:
+          name: Illuminance threshold
+          description: The illuminance sensor value must be below this number for the light to turn on (If the light is already on, this will be ignored)
+          default: 850
+          selector:
+            number:
+              min: 0
+              max: 1000
+    dim_lights:
+      name: Dim lights
+      icon: mdi:lightbulb-on-50
+      description: (optional)
+      input:
+        night_dim_lights:
+          name: Use Dim lights
+          description: if this is checked, the blueprint will dim supported lights after given time of day
+          default: false
+          selector:
+            boolean:
+        night_dim_lights_start_time:
+          name: Time of day to start dimming lights
+          description: Dim lights after this time of day
+          default: "21:00:00"
+          selector:
+            time:
+        night_dim_lights_stop_time:
+          name: Time of day to stop dimming lights
+          description: Return to full brightness after this time of day
+          default: "03:00:00"
+          selector:
+            time:
+        night_target_light_brightness:
+          name: Light brightness at night
+          description: Brightness of lights on trigger at night
+          default: 50
+          selector:
+            number:
+              min: 0
+              max: 100
+              step: 1
+              unit_of_measurement: "%"
+              mode: slider
+        night_target_light_temp:
+          name: Light temperature at night
+          description: temperature of lights on trigger at night
+          default: 4200
+          selector:
+            color_temp:
+              unit: kelvin
+    scene:
+      name: Scenes
+      icon: mdi:lightbulb-group
+      description: (optional)
+      input:
+        use_scene_bool:
+          name: Use Scene mode
+          description: if this is checked, the light will use a scene instead of turning off when no motion is detected. blocking entity will still turn light off
+          default: false
+          selector:
+            boolean:
+        turn_on_when_scene_starts_bool:
+          name: Start the scene at the given time even if motion is not detected
+          description: if this is checked, the light will turn on using the scene specified at the start time, even if no motion is detected. if this is disabled, the light will remain off until motion is detected. Blocking entity overrides this if set to true.
+          default: false
+          selector:
+            boolean:
+        use_scene_start:
+          name: Time of day to start using scene
+          description: Time of day to start using the scene
+          default: "00:00:00"
+          selector:
+            time:
+        scene_to_use:
+          name: Select scene
+          description: Select scene to use when no motion is detected.
+          default: {}
+          selector:
+            entity:
+              filter:
+                - domain: scene
+    shower_mode:
+      name: Shower mode
+      icon: mdi:shower
+      description: (optional)
+      input:
+        use_humidity_sensor:
+          name: Use Shower mode
+          description: When humidity is above a certain threshold, keep light on even if motion is not detected (if sensor can't detect behind shower curtains) (Blocking entity overwites this)
+          default: false
+          selector:
+            boolean:
+        humidity_sensor:
+          name: Humidity Sensor
+          description: Select humidity sensor
+          default: {}
+          selector:
+            entity:
+              filter:
+                domain: sensor
+                device_class: humidity
+        above_threshold:
+          name: Keep on above humidity %
+          description: Set this high enough that it only triggers when the shower is running.
+          default: 80
+          selector:
+            number:
+              min: 0
+              max: 100
+              step: 1
+              unit_of_measurement: "%"
+              mode: slider
+        below_threshold:
+          name: Turn off below humidity %
+          description: Should be 5-10% below above-threshold. Space further apart if bathroom mode bounces on-off
+          default: 73
+          selector:
+            number:
+              min: 0
+              max: 100
+              step: 1
+              unit_of_measurement: "%"
+              mode: slider
+
+mode: restart
+max_exceeded: silent
+
+trigger_variables:
+  use_illuminance: !input use_illuminance_sensor
+  use_scene: !input use_scene_bool
+  turn_on_when_scene_starts: !input turn_on_when_scene_starts_bool
+  use_scene_time: !input use_scene_start
+
+variables:
+  lights: !input target_light
+  light_on: "{{ expand(area_entities(area_name(lights.area_id)) | select('match', 'light')) | selectattr('state', 'eq', 'off') | list | count == 0 }}"
+  target_light_brightness: !input target_light_brightness
+  target_light_temp: !input target_light_temp
+  night_dim_lights: !input night_dim_lights
+  night_dim_lights_start_time: !input night_dim_lights_start_time
+  night_dim_lights_stop_time: !input night_dim_lights_stop_time
+  night_target_light_brightness: !input night_target_light_brightness
+  night_target_light_temp: !input night_target_light_temp
+  brightness: "{% if states('sensor.time') > night_dim_lights_start_time or states('sensor.time') < night_dim_lights_stop_time and night_dim_lights == true %} {{night_target_light_brightness}} {% else %} {{target_light_brightness}} {%endif%}"
+  temperature: "{% if states('sensor.time') > night_dim_lights_start_time or states('sensor.time') < night_dim_lights_stop_time and night_dim_lights == true %} {{night_target_light_temp}} {% else %} {{target_light_temp}} {%endif%}"
+  shower_mode: !input use_humidity_sensor
+  shower_humidity_sensor: !input humidity_sensor
+  shower_above_threshold: !input above_threshold
+  shower_below_threshold: !input below_threshold
+  shower_keep_on: "{% if shower_humidity_sensor != {} and shower_mode == true and states(shower_humidity_sensor) | int > shower_above_threshold %} {{true}} {% else %} {{false}} {%endif%}"
+
+trigger:
+  - platform: state
+    entity_id:
+      - !input motion_sensor
+    to: "on"
+  - platform: state
+    entity_id:
+      - !input blocking_entity
+    to: "on"
+  - platform: time
+    at: !input use_scene_start
+    id: scene-on
+
+action:
+  - if:
+      - condition: trigger
+        id:
+          - scene-on
+      - condition: state
+        entity_id: !input blocking_entity
+        state: "off"
+    then:
+      - if:
+          - condition: template
+            value_template: "{{ turn_on_when_scene_starts == true }}"
+        then:
+          - action: scene.turn_on
+            target:
+              entity_id: !input scene_to_use
+    else:
+      - if:
+          - condition: state
+            entity_id: !input motion_sensor
+            state: "on"
+          - condition: state
+            entity_id: !input blocking_entity
+            state: "off"
+        then:
+          - if:
+              - condition: template
+                value_template: "{{ use_illuminance == true }}"
+            then:
+              - if:
+                  - condition: or
+                    conditions:
+                      - condition: numeric_state
+                        entity_id: !input illuminance_sensor
+                        below: !input Illuminance_threshold
+                      - condition: template
+                        value_template: "{{ light_on == true }}"
+                then:
+                  - action: light.turn_on
+                    target: !input target_light
+                    data:
+                      brightness_pct: "{{ brightness }}"
+                      kelvin: "{{ temperature }}"
+                  - wait_for_trigger:
+                      - platform: state
+                        entity_id: !input motion_sensor
+                        from: "on"
+                        to: "off"
+                  - delay: !input no_motion_wait
+                  - if:
+                      - condition: template
+                        value_template: "{% if states('sensor.time') > use_scene_time and use_scene == true %} true {% else %} false {%endif%}"
+                    then:
+                      - action: scene.turn_on
+                        target:
+                          entity_id: !input scene_to_use
+                    else:
+                      - if:
+                          - condition: template
+                            value_template: "{% if shower_keep_on == true %} true {% else %} false {%endif%}"
+                        then:
+                          - wait_for_trigger:
+                              - platform: numeric_state
+                                entity_id: !input humidity_sensor
+                                below: !input below_threshold
+                          - action: light.turn_off
+                            target: !input target_light
+                        else:
+                          - action: light.turn_off
+                            target: !input target_light
+                else:
+                  - if:
+                      - condition: template
+                        value_template: "{% if shower_keep_on == true %} true {% else %} false {%endif%}"
+                    then:
+                      - wait_for_trigger:
+                          - platform: numeric_state
+                            entity_id: !input humidity_sensor
+                            below: !input below_threshold
+                      - action: light.turn_off
+                        target: !input target_light
+                    else:
+                      - action: light.turn_off
+                        target: !input target_light
+            else:
+              - action: light.turn_on
+                target: !input target_light
+                data:
+                  brightness_pct: "{{ brightness }}"
+                  kelvin: "{{ temperature }}"
+              - wait_for_trigger:
+                  - platform: state
+                    entity_id: !input motion_sensor
+                    from: "on"
+                    to: "off"
+              - delay: !input no_motion_wait
+              - if:
+                  - condition: template
+                    value_template: "{% if states('sensor.time') > use_scene_time and use_scene == true %} true {% else %} false {%endif%}"
+                then:
+                  - action: scene.turn_on
+                    target:
+                      entity_id: !input scene_to_use
+                else:
+                  - if:
+                      - condition: template
+                        value_template: "{% if shower_keep_on == true %} true {% else %} false {%endif%}"
+                    then:
+                      - wait_for_trigger:
+                          - platform: numeric_state
+                            entity_id: !input humidity_sensor
+                            below: !input below_threshold
+                      - action: light.turn_off
+                        target: !input target_light
+                    else:
+                      - action: light.turn_off
+                        target: !input target_light
+        else:
+          - if:
+              - condition: template
+                value_template: "{% if shower_keep_on == true %} true {% else %} false {%endif%}"
+              - condition: state
+                entity_id: !input blocking_entity
+                state: "off"
+            then:
+              - wait_for_trigger:
+                  - platform: numeric_state
+                    entity_id: !input humidity_sensor
+                    below: !input below_threshold
+              - action: light.turn_off
+                target: !input target_light
+            else:
+              - action: light.turn_off
+                target: !input target_light
