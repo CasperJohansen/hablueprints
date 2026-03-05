@@ -266,18 +266,10 @@ variables:
   night_target_light_brightness: !input night_target_light_brightness
   night_target_light_temp: !input night_target_light_temp
 
-  # Determine whether we are currently in the night dimming window.
-  # Handles midnight wrap-around correctly (e.g. start=21:00, stop=03:00).
-  is_night_window: >
-    {% set t = now().strftime('%H:%M:%S') %}
-    {{ night_dim_lights == true and
-       (t >= night_dim_lights_start_time or t < night_dim_lights_stop_time) }}
-
-  brightness: >
-    {{ night_target_light_brightness if is_night_window else target_light_brightness }}
-
-  temperature: >
-    {{ night_target_light_temp if is_night_window else target_light_temp }}
+  # NOTE: brightness and temperature are intentionally NOT pre-computed here.
+  # They are evaluated inline in each light.turn_on call so that now() is
+  # called at the moment the light actually turns on, not at trigger time.
+  # This ensures the correct day/night values are always used.
 
   shower_mode: !input use_humidity_sensor
   shower_humidity_sensor: !input humidity_sensor
@@ -365,8 +357,22 @@ action:
                   - action: light.turn_on
                     target: !input target_light
                     data:
-                      brightness_pct: "{{ brightness }}"
-                      color_temp_kelvin: "{{ temperature | int }}"
+                      brightness_pct: >
+                        {% set t = now().strftime('%H:%M:%S') %}
+                        {% if night_dim_lights == true and
+                             (t >= night_dim_lights_start_time or t < night_dim_lights_stop_time) %}
+                          {{ night_target_light_brightness }}
+                        {% else %}
+                          {{ target_light_brightness }}
+                        {% endif %}
+                      color_temp_kelvin: >
+                        {% set t = now().strftime('%H:%M:%S') %}
+                        {% if night_dim_lights == true and
+                             (t >= night_dim_lights_start_time or t < night_dim_lights_stop_time) %}
+                          {{ night_target_light_temp | int }}
+                        {% else %}
+                          {{ target_light_temp | int }}
+                        {% endif %}
                   - wait_for_trigger:
                       - platform: state
                         entity_id: !input motion_sensor
@@ -416,8 +422,22 @@ action:
               - action: light.turn_on
                 target: !input target_light
                 data:
-                  brightness_pct: "{{ brightness }}"
-                  color_temp_kelvin: "{{ temperature | int }}"
+                  brightness_pct: >
+                    {% set t = now().strftime('%H:%M:%S') %}
+                    {% if night_dim_lights == true and
+                         (t >= night_dim_lights_start_time or t < night_dim_lights_stop_time) %}
+                      {{ night_target_light_brightness }}
+                    {% else %}
+                      {{ target_light_brightness }}
+                    {% endif %}
+                  color_temp_kelvin: >
+                    {% set t = now().strftime('%H:%M:%S') %}
+                    {% if night_dim_lights == true and
+                         (t >= night_dim_lights_start_time or t < night_dim_lights_stop_time) %}
+                      {{ night_target_light_temp | int }}
+                    {% else %}
+                      {{ target_light_temp | int }}
+                    {% endif %}
               - wait_for_trigger:
                   - platform: state
                     entity_id: !input motion_sensor
